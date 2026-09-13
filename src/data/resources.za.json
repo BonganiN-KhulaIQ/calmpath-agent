@@ -1,0 +1,8 @@
+{
+  "registryStatus": "unverified-demonstration",
+  "resources": [
+    {"id": "sadag", "name": "South African Depression and Anxiety Group", "officialUrl": "https://www.sadag.org/", "contact": null},
+    {"id": "lifeline-sa", "name": "Lifeline South Africa", "officialUrl": null, "contact": null},
+    {"id": "unisa-support", "name": "UNISA student support", "officialUrl": "https://www.unisa.ac.za/", "contact": null}
+  ]
+}
