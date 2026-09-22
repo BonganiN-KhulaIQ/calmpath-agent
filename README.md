@@ -12,8 +12,11 @@ and [What it cannot do](#what-it-cannot-do) below.
 
 CalmPath is a small chat-based agent intended for students studying at a distance (ODeL) who
 want a low-stakes place to talk through study stress, workload, and everyday wellbeing, and to
-be pointed toward appropriate human support when it's needed. It runs entirely in the browser: no
-account, no database, no server-side conversation storage.
+be pointed toward appropriate human support when it's needed. The chat UI runs in the browser, but
+the safety pipeline itself runs server-side (a Vercel serverless function) so it can't be edited
+from devtools; there is still no account, no database, and no server-side conversation storage —
+session state travels with the browser as a signed, opaque token instead (see
+[Architecture: client/server split](#architecture-clientserver-split) below).
 
 ## Intended users / use case
 
@@ -85,6 +88,29 @@ turn -> preScreen -> intent classification -> policy gate
 
 Full detail is in [`SAFETY.md`](./SAFETY.md) and [`CLAUDE.md`](./CLAUDE.md).
 
+## Architecture: client/server split
+
+The pipeline above now runs **server-side**, not in the browser:
+
+- `POST /api/turn` (a Vercel serverless function, `api/turn.ts`) is the only way a turn reaches
+  the pipeline. The browser sends `{ text, sessionToken }` and gets back
+  `{ sessionToken, response, ... }`.
+- All real logic lives in `src/server/turnHandler.ts` (calls the unchanged `runAgentTurn`) and
+  `src/server/sessionToken.ts` (signs/verifies session state) — both framework-independent and
+  directly unit-tested, with `api/turn.ts` as a thin HTTP adapter over them.
+- The browser (`src/main.tsx`, via `src/client/api.ts`) holds only an **opaque, server-signed
+  token** between turns — never the raw safety state. The token is the session's JSON payload,
+  HMAC-signed with a server-only secret (`CALMPATH_SESSION_SECRET`) so the client can carry it
+  around but cannot edit it: any tampering (a devtools attempt to roll a session's tier back
+  down, or just a corrupted token) is rejected and falls back to a fresh T0 session — the same
+  outcome as clicking "Reset session", never a crash and never a trusted forged claim.
+- `npm run dev` still works exactly as one command: a small dev-only Vite plugin serves
+  `/api/turn` locally by calling the same handler in-process, so there's no separate server or
+  Vercel CLI needed to try the app on your own machine.
+- Nothing here adds a database, accounts, or persistence — the signed token itself *is* the
+  session state, held entirely by the browser, same as before this change. See `PROGRESS.md` for
+  the full writeup of why this changed and how it was verified.
+
 ## Running it locally
 
 Requires Node.js (developed against Node 22) and npm.
@@ -104,8 +130,19 @@ npm run test       # vitest run
 npm run build      # production build (vite build)
 ```
 
-As of the latest verification pass: typecheck is clean, all 62 tests pass, and the production
+As of the latest verification pass: typecheck is clean, all 96 tests pass, and the production
 build succeeds. See `PROGRESS.md` for the exact command output from the most recent run.
+
+## Deploying (Vercel)
+
+Set one environment variable in the Vercel project's settings before deploying to production:
+
+- `CALMPATH_SESSION_SECRET` — any long, random string. It signs session tokens so a student's
+  browser can carry their session between requests without being able to edit it. Without this
+  set, the server falls back to a fixed, publicly-known development secret in local/preview use
+  and logs a warning; it deliberately refuses to start with that fallback in a production
+  deployment (`VERCEL_ENV === "production"`) so a missing secret fails loudly instead of shipping
+  an insecure default.
 
 ## Current provider / model status
 

@@ -1,5 +1,88 @@
 # Progress
 
+## Backend split: safety pipeline moved server-side, signed session tokens
+
+**What changed:** the deterministic safety pipeline (`runAgentTurn` and everything it calls —
+`risk.ts`, `policy.ts`, `outputGate.ts`, the router, the 10 tools, the composer) now runs on the
+server, not in the browser. Nothing about the pipeline itself changed — same functions, same
+files, same behavior, same 81 pre-existing tests untouched and passing. What moved is *who calls
+it*: previously `main.tsx` called `runAgentTurn` directly in the browser; now the browser calls a
+new `POST /api/turn` endpoint, which calls it.
+
+**Why:** with the pipeline running client-side, the safety gates were enforced by code the
+student's own browser was executing — auditable, but also editable. Anyone with devtools open
+could, in principle, patch out the T3 check entirely. Moving the same, unmodified pipeline behind
+an HTTP boundary means the gates run somewhere the client can inspect responses from but cannot
+alter the logic of.
+
+**The harder problem this created, and how it's solved:** CalmPath is explicitly no-database,
+no-accounts (`CLAUDE.md`), and correctly so for a project this early — so session state (the risk
+tier, turn count, last intent) still has to live on the client and travel with each request, the
+same as before. But a plain JSON session sent back by the client is just as editable as the old
+in-browser pipeline was: a student could edit `{"safety":{"tier":"T0"}}` back into a request and
+undo their own sticky escalation without using "Reset session".
+
+Fixed with **signed, stateless session tokens** (`src/server/sessionToken.ts`): every response
+carries an opaque token — the session JSON, HMAC-SHA256-signed with a server-only secret
+(`CALMPATH_SESSION_SECRET`), base64url-encoded as `<payload>.<signature>`. The client stores and
+returns this token verbatim; it never sees the secret and cannot produce a valid signature for an
+edited payload. On the next request the server re-verifies the signature (constant-time
+comparison) and the decoded shape (a zod schema, `src/server/sessionSchema.ts`) before trusting
+anything in it. Any failure — no token, corrupted token, bad signature, wrong shape — falls back
+to a **brand-new T0 session**, exactly what "Reset session" already produces, rather than
+throwing or silently trusting a forged claim. This still stores nothing server-side: the signed
+token *is* the state, held entirely by the client, same as the plain JSON was before.
+
+**New files:**
+- `src/server/turnHandler.ts` — framework-independent `handleTurnRequest(body)`; verifies the
+  token, calls the unchanged `runAgentTurn` with the mock provider, signs and returns the new
+  session token plus the response.
+- `src/server/sessionToken.ts` / `src/server/sessionSchema.ts` — signing/verification and the
+  validated session shape.
+- `api/turn.ts` — the actual Vercel serverless function; a thin adapter translating
+  `VercelRequest`/`VercelResponse` to/from `handleTurnRequest`. All real logic lives in
+  `src/server/`, not here, so it's testable without any HTTP framework involved.
+- `src/client/api.ts` — the browser's fetch wrapper; `main.tsx` now holds only the opaque token
+  string in React state, never the raw safety object.
+- A dev-only Vite plugin in `vite.config.ts` serves `/api/turn` during `npm run dev` by calling
+  `handleTurnRequest` in-process, so local development still works with the exact same one
+  command as before — no Vercel CLI or separate server needed to try the app locally. This plugin
+  is not part of the production build; Vercel serves `api/turn.ts` directly there.
+
+**New tests (15 — 96 total, all passing, 0 removed/weakened):**
+- `tests/sessionToken.test.ts` (7) — sign/verify round-trips for fresh and escalated sessions;
+  falls back to a fresh session for a missing, malformed, or corrupted-signature token; and the
+  key case — a payload with a forged lower tier, re-encoded without a valid signature for that
+  new payload, is rejected rather than trusted.
+- `tests/turnHandler.test.ts` (8) — proves the full pipeline behavior through the HTTP-shaped
+  boundary: T0 routing, T3 crisis handling, sticky escalation carried across two real requests via
+  the returned token, a devtools-style tampered token falling back to fresh T0 rather than
+  reviving the T3 payload, malformed request bodies rejected, and empty/over-length text still
+  rejected server-side exactly as `parseTurnInput` always required.
+
+**Manual end-to-end verification (not just unit tests):** ran `npm run dev` and sent real HTTP
+requests to `/api/turn` with `curl`. A calm message returned T0 with `reflective_conversation`; an
+explicit crisis message returned T3 with the forced response and no tool; a calm follow-up sent
+with the T3 session's own real token stayed at T3 (sticky escalation proven over a real network
+round-trip, not just in-process); a `GET` request correctly returned 405. Also confirmed the
+production client bundle (`dist/assets/*.js`) contains no trace of `CALMPATH_SESSION_SECRET`,
+`createHmac`, or `node:crypto` — the signing logic never ships to the browser.
+
+**What did NOT change:** the pipeline's internal logic, order, and every existing test file are
+untouched. The model provider is still mock-only (see "Current provider / model status" below) —
+this phase was about where the gates run and how session state is protected in transit, not about
+adding a real LLM. No database, accounts, or server-side conversation storage were added; nothing
+new is persisted anywhere.
+
+**Before deploying:** the Vercel project needs a real `CALMPATH_SESSION_SECRET` environment
+variable set (any long random string). Without it, the server falls back to a fixed, publicly-
+known development secret and logs a warning — safe for local dev, not for production, and
+`sessionToken.ts` deliberately throws instead of using that fallback when `VERCEL_ENV` is
+`"production"` and the variable is unset, so a misconfigured production deploy fails loudly
+rather than shipping with a guessable signing key.
+
+---
+
 ## Investigation (post-safety-fix): reported "academic overwhelm reaches T3" — NOT a bug
 
 **Reported:** manually testing `"I have several assignments due soon and I'm completely

@@ -1,9 +1,7 @@
 import React, { useCallback, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
-import { runAgentTurn, initialAgentState } from "./agent/orchestrator";
-import { mockProvider } from "./providers/mock";
-import type { SessionContext } from "./agent/session";
+import { sendTurn } from "./client/api";
 
 interface DisplayMessage {
   id: number;
@@ -26,7 +24,10 @@ const INTRO_MESSAGE: DisplayMessage = {
 };
 
 function App() {
-  const [session, setSession] = useState<SessionContext>(() => initialAgentState());
+  // An opaque, server-signed token — the browser never holds raw safety
+  // state again. null means "no session yet / just reset"; the server
+  // treats that as a fresh T0 session (see src/server/sessionToken.ts).
+  const [sessionToken, setSessionToken] = useState<string | null>(null);
   const [messages, setMessages] = useState<DisplayMessage[]>([INTRO_MESSAGE]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -48,12 +49,13 @@ function App() {
     setLoading(true);
 
     try {
-      const result = await runAgentTurn(session, text, mockProvider);
-      setSession(result.session);
+      const result = await sendTurn(sessionToken, text);
+      setSessionToken(result.sessionToken);
       setMessages((prev) => [...prev, { id: nextMessageId(), role: "agent", text: result.response }]);
     } catch {
       // Turn validation (e.g. empty/too-long input) failed before any safety
-      // state changed. Session is left exactly as it was.
+      // state changed, or the request itself failed. Session is left as it
+      // was — sessionToken is only ever updated from a successful response.
       setError("That message couldn't be sent — try a shorter message.");
     } finally {
       setLoading(false);
@@ -62,7 +64,7 @@ function App() {
   }
 
   function handleReset() {
-    setSession(initialAgentState());
+    setSessionToken(null);
     setMessages([{ ...INTRO_MESSAGE, id: nextMessageId() }]);
     setInput("");
     setError(null);
