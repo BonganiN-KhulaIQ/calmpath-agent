@@ -52,4 +52,12 @@ describe("selectTool", () => {
       "support_pathway_guide",
     );
   });
+
+  it("routes greeting intent to greeting_response regardless of tier", () => {
+    const t0Policy = evaluatePolicy("T0", "greeting");
+    expect(selectTool({ intent: "greeting", tier: "T0", policy: t0Policy })).toBe("greeting_response");
+
+    const t2Policy = evaluatePolicy("T2", "greeting");
+    expect(selectTool({ intent: "greeting", tier: "T2", policy: t2Policy })).toBe("greeting_response");
+  });
 });

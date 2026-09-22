@@ -10,6 +10,7 @@ import { appointmentPrep } from "./appointmentPrep";
 import { actionPlanBuilder } from "./actionPlanBuilder";
 import { sessionSummary } from "./sessionSummary";
 import { supportPathwayGuide } from "./supportPathwayGuide";
+import { greetingResponse } from "./greetingResponse";
 
 const TOOL_IMPLEMENTATIONS: Record<ToolId, ToolFn> = {
   reflective_conversation: reflectiveConversation,
@@ -22,6 +23,7 @@ const TOOL_IMPLEMENTATIONS: Record<ToolId, ToolFn> = {
   action_plan_builder: actionPlanBuilder,
   session_summary: sessionSummary,
   support_pathway_guide: supportPathwayGuide,
+  greeting_response: greetingResponse,
 };
 
 export function runTool(toolId: ToolId, ctx: ToolContext): ToolOutput {

@@ -26,6 +26,7 @@ export const SessionContextSchema = z.object({
       "prepare",
       "record",
       "learn",
+      "greeting",
       "crisis_signal",
     ])
     .nullable(),

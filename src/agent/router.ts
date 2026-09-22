@@ -39,6 +39,9 @@ export function selectTool({ intent, tier, policy }: RouterInput): ToolId {
     case "learn":
       return "odel_navigator";
 
+    case "greeting":
+      return "greeting_response";
+
     case "plan":
       return policy.allowPlanningTools ? "action_plan_builder" : "balance_support";
 

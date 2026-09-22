@@ -9,6 +9,7 @@ export const TOOL_IDS = [
   "action_plan_builder",
   "session_summary",
   "support_pathway_guide",
+  "greeting_response",
 ] as const;
 
 export type ToolId = (typeof TOOL_IDS)[number];

@@ -1,5 +1,47 @@
 # Progress
 
+## Feature: greeting intent — CalmPath now greets back on a plain "hi"
+
+**What changed:** added `"greeting"` as a new `Intent` (agent/intent.ts), a new `greeting_response`
+tool, and a router case mapping it there. A message that's essentially just a greeting ("hi",
+"hello", "good morning", "howzit", etc. — see the `GREETING` pattern in `intent.ts`) now gets a
+warm, tier-appropriate hello back instead of the generic `reflective_conversation` opener.
+
+**Deliberately did NOT change:** the pipeline order, the policy gate, or sticky escalation. This
+was built as "one more intent the router already knows how to handle," not a special case that
+runs outside the safety pipeline:
+- Tier resolution (`preScreen`) still runs first, on the raw text, completely independent of
+  intent. A greeting can never affect what tier a turn resolves to.
+- Greeting detection is checked *last*, after every more specific intent (`plan`, `navigate`,
+  `prepare`, `understand`, `crisis_signal`) has had a chance to match — so `"Hi, where can I find
+  support?"` still classifies as `navigate` and routes to real help, not a cheerful hello.
+  `"Hi, this feels like an emergency"` still classifies as `crisis_signal`.
+- The `greeting_response` tool is only ever reached when `policy.allowModelGeneration` is true
+  (T0–T2), same as every other tool — a session already at T3 from an earlier real crisis message
+  still gets the forced T3 response for a later "hi", not a reset back to a friendly greeting.
+  Verified directly (E2E-H in `tests/e2e.test.ts`): crisis message → T3 → later "Hi" in the same
+  session → still T3, `tool: null`, response is still the crisis pathway text.
+- `src/server/sessionSchema.ts`'s hand-maintained `Intent` enum was updated to include
+  `"greeting"` — this is the one place that's easy to forget when the `Intent` union grows, since
+  a stale schema would silently reject any session whose `lastIntent` is `"greeting"` and fall
+  back to a fresh session. Added a dedicated round-trip regression test for exactly this
+  (`tests/sessionToken.test.ts`) so it can't regress silently again.
+
+**New tests (9 — 105 total, all passing, 0 removed/weakened):** greeting classification
+(positive/negative cases in `tests/intent.test.ts`), router case (`tests/router.test.ts`), the
+session-token schema round-trip for the new intent value, and three E2E scenarios covering the
+plain-greeting case, the greeting-plus-real-question case, and the sticky-escalation-not-bypassed
+case. `tests/tools.test.ts`'s existing `it.each(TOOL_IDS)` output-gate sweep automatically covers
+the new tool with no changes needed there.
+
+**Verified:** typecheck clean, 105/105 tests passing, production build succeeds, and confirmed
+live via `npm run dev` + real HTTP requests to `/api/turn`: a fresh "Hi" returns a greeting with
+`tool: "greeting_response"`; `"Hi, where can I find support?"` still returns `resource_navigator`;
+and sending "Hi" with a session token from a prior real crisis message still returns the T3 forced
+response untouched.
+
+---
+
 ## Backend split: safety pipeline moved server-side, signed session tokens
 
 **What changed:** the deterministic safety pipeline (`runAgentTurn` and everything it calls —

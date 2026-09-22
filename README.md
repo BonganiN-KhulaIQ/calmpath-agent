@@ -31,6 +31,8 @@ session state travels with the browser as a signed, opaque token instead (see
 Every response is produced by one of ten fixed, local tools plus a language-model provider, chosen
 by a deterministic router based on what the student seems to need and how the conversation has
 escalated:
+- a warm greeting back on a plain "hi" (`greeting_response`) — routed like any other intent, so it
+  never overrides sticky escalation or a more specific request in the same message
 - reflective, supportive conversation (`reflective_conversation`, `emotional_checkin`)
 - study/work balance support, without productivity pressure (`balance_support`)
 - small, optional planning support, only when risk level permits it (`action_plan_builder`)

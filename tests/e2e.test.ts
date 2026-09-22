@@ -163,3 +163,45 @@ describe("E2E-G — false-positive crisis wording", () => {
     expect(result.tool).not.toBe("support_pathway_guide");
   });
 });
+
+describe("E2E-H — greeting", () => {
+  it("greets back on a fresh session's first plain greeting", async () => {
+    const provider = fakeProvider("(model text, unused for this assertion)");
+    const session = initialAgentState();
+
+    const result = await runAgentTurn(session, "Hi", provider);
+
+    expect(result.tier).toBe("T0");
+    expect(result.intent).toBe("greeting");
+    expect(result.tool).toBe("greeting_response");
+    expect(result.blocked).toBe(false);
+    expect(result.response).toMatch(/hello|hi/i);
+  });
+
+  it("a greeting attached to a real question still routes to the tool that question needs", async () => {
+    const provider = fakeProvider("okay");
+    const session = initialAgentState();
+
+    const result = await runAgentTurn(session, "Hi, where can I find support?", provider);
+
+    expect(result.intent).toBe("navigate");
+    expect(result.tool).toBe("resource_navigator");
+  });
+
+  it("does NOT let a later plain greeting undo a session's sticky T3 escalation", async () => {
+    const provider = fakeProvider("okay");
+    let session = initialAgentState();
+
+    const crisisTurn = await runAgentTurn(session, "I want to kill myself.", provider);
+    session = crisisTurn.session;
+    expect(crisisTurn.tier).toBe("T3");
+
+    // The whole point of this feature is a friendlier reply for a plain
+    // "hi" — it must never become a way to slip past a committed T3 tier.
+    const greetingAfterCrisis = await runAgentTurn(session, "Hi", provider);
+    expect(greetingAfterCrisis.tier).toBe("T3");
+    expect(greetingAfterCrisis.tool).toBeNull();
+    expect(greetingAfterCrisis.blocked).toBe(false);
+    expect(greetingAfterCrisis.response).not.toMatch(/^hello! i'm glad you're here/i);
+  });
+});

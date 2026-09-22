@@ -14,4 +14,26 @@ describe("classifyIntent", () => {
     expect(classifyIntent("I just want to die.")).toBe("crisis_signal");
     expect(classifyIntent("This feels like an emergency.")).toBe("crisis_signal");
   });
+
+  it("classifies a plain greeting as greeting", () => {
+    expect(classifyIntent("Hi")).toBe("greeting");
+    expect(classifyIntent("hello!")).toBe("greeting");
+    expect(classifyIntent("Hey there")).toBe("greeting");
+    expect(classifyIntent("Good morning")).toBe("greeting");
+    expect(classifyIntent("  howzit  ")).toBe("greeting");
+    expect(classifyIntent("Hello, CalmPath")).toBe("greeting");
+  });
+
+  it("does not classify a message that merely starts with a greeting as greeting", () => {
+    // A greeting attached to real content must still route to the intent
+    // that content actually needs — a cheerful hello would be the wrong
+    // response to someone asking where to find support.
+    expect(classifyIntent("Hi, I don't know where to find support.")).toBe("navigate");
+    expect(classifyIntent("Hello, can you explain what CalmPath does?")).toBe("understand");
+    expect(classifyIntent("Hi, I want to plan my week better.")).toBe("plan");
+  });
+
+  it("still prioritizes crisis_signal over a greeting-shaped opening", () => {
+    expect(classifyIntent("Hi, this feels like an emergency.")).toBe("crisis_signal");
+  });
 });

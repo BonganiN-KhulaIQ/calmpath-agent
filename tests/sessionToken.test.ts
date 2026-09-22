@@ -9,6 +9,20 @@ describe("session token signing", () => {
     expect(verifySession(token)).toEqual(session);
   });
 
+  it("round-trips a session whose lastIntent is the newer 'greeting' value", () => {
+    // Regression guard: sessionSchema.ts hard-codes the Intent list by
+    // hand and must be kept in sync whenever agent/intent.ts's Intent
+    // union grows — this would silently fail (falling back to a fresh
+    // session) if that schema were forgotten when "greeting" was added.
+    const withGreeting = advanceSession(
+      createSession(),
+      { tier: "T0", escalated: false, version: "0.1.0" },
+      "greeting",
+    );
+    const token = signSession(withGreeting);
+    expect(verifySession(token)).toEqual(withGreeting);
+  });
+
   it("round-trips an escalated session unchanged", () => {
     const escalated = advanceSession(
       createSession(),
