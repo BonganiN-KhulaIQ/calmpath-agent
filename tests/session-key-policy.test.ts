@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionConfigError, signSession } from "../src/server/sessionToken";
 import { createSession } from "../src/agent/session";
-import handler from "../api/turn";
+import handler from "../src/server/turnApi";
 
 const KEYS = ["CALMPATH_SESSION_SECRET", "VERCEL_ENV", "NODE_ENV"] as const;
 const saved: Record<string, string | undefined> = {};

@@ -1,5 +1,42 @@
 # Progress
 
+## Fix: /api/turn crashed on Vercel (ERR_MODULE_NOT_FOUND) — function is now bundled
+
+**Symptom:** on a Vercel deployment every message failed with "That message couldn't be sent".
+Vercel's runtime log: `Error [ERR_MODULE_NOT_FOUND]: Cannot find module
+'/var/task/src/server/turnHandler' imported from /var/task/api/turn.js`.
+
+**Cause (pre-existing, not introduced by the DevOps changes):** `package.json` is `"type": "module"`,
+so Vercel runs the function as native Node ES modules. Node's ESM loader does not resolve the
+extensionless relative imports used throughout `src/` (and does not allow a JSON import without
+import attributes, which `resources.ts` uses). The function therefore crashed at start-up, before
+any of our code ran. It was never caught because the app had only ever been exercised through
+`npm run dev` (the Vite dev plugin) and Vitest, and both resolve those imports themselves.
+Reproduced locally: transpiling `src/` file by file and importing it with plain Node gives the same
+`ERR_MODULE_NOT_FOUND`.
+
+**Fix:** `api/turn.ts` moved to `src/server/turnApi.ts` (code unchanged apart from two import paths).
+`npm run build:api` (`scripts/build-api.mjs`, esbuild) bundles it and everything it imports into one
+self-contained ES module, `api/turn.js` (about 24 kB, readable, not minified; `zod` is the only
+import left besides `node:crypto`, and it is a real dependency that Node loads natively). `api/turn.js`
+is committed on purpose, because Vercel finds functions from the repository, not from files created
+during the build. `npm run build` now runs `build:api` first. CI re-runs `build:api` and fails if the
+committed bundle differs, so it cannot drift from the source. Output is deterministic.
+
+**Tests:** `tests/api-bundle.test.ts` (5) loads the committed `api/turn.js` as a native Node ES module,
+the way production does: no relative imports left, a plain "Hi" gets the greeting at T0, a
+curly-apostrophe crisis message is T3 with no tool, GET is 405, empty text is 400, and a Preview
+deployment with no secret is 500. `tests/session-key-policy.test.ts` now imports `turnApi`. Typecheck
+clean, 181/181 tests, build clean. Also run by hand with `env -i` under plain Node: same results.
+
+**Not verified:** I could not run it on Vercel itself from here. Check the first Preview deployment
+after pushing: open it, send "Hi", and read the function logs if it fails.
+
+**Edit workflow from now on:** change `src/server/turnApi.ts` (or anything it imports), run
+`npm run build:api`, and commit `api/turn.js` with it.
+
+---
+
 ## Session signing: preview-key fix, clear failures, replay documented
 
 **Preview-key fix:** `sessionToken.ts` used to allow the public development fallback key anywhere

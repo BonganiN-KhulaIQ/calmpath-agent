@@ -94,12 +94,12 @@ Full detail is in [`SAFETY.md`](./SAFETY.md) and [`CLAUDE.md`](./CLAUDE.md).
 
 The pipeline above now runs **server-side**, not in the browser:
 
-- `POST /api/turn` (a Vercel serverless function, `api/turn.ts`) is the only way a turn reaches
+- `POST /api/turn` (a Vercel serverless function, `src/server/turnApi.ts` (bundled into `api/turn.js` by `npm run build:api`)) is the only way a turn reaches
   the pipeline. The browser sends `{ text, sessionToken }` and gets back
   `{ sessionToken, response, ... }`.
 - All real logic lives in `src/server/turnHandler.ts` (calls the unchanged `runAgentTurn`) and
   `src/server/sessionToken.ts` (signs/verifies session state) — both framework-independent and
-  directly unit-tested, with `api/turn.ts` as a thin HTTP adapter over them.
+  directly unit-tested, with `src/server/turnApi.ts` (bundled into `api/turn.js` by `npm run build:api`) as a thin HTTP adapter over them.
 - The browser (`src/main.tsx`, via `src/client/api.ts`) holds only an **opaque, server-signed
   token** between turns — never the raw safety state. The token is the session's JSON payload,
   HMAC-signed with a server-only secret (`CALMPATH_SESSION_SECRET`) so the client can carry it
