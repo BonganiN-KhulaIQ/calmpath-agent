@@ -1,5 +1,27 @@
 # Progress
 
+## Infra: GitHub Actions CI (`.github/workflows/ci.yml`)
+
+**What changed:** added CI that runs on every push to `main` and every PR: `npm ci`, typecheck,
+the full test suite (including the safety suites), production build, and a check that the client
+bundle contains no `CALMPATH_SESSION_SECRET` / `createHmac` / `node:crypto`. A separate job runs
+`npm audit --omit=dev --audit-level=high`. Workflow permissions are `contents: read`, checkout
+does not persist credentials, runs are cancelled when superseded, Node 22.
+
+**Dependency fix needed for a green audit:** runtime dependency `zod` was 4.x below 4.6.6, which
+has a high-severity memory-exhaustion advisory (GHSA-mrhx-c7xc-m3w5). `zod` guards the `/api/turn`
+request body and the session-token shape, so it was bumped within the existing `^4.1.5` range to
+4.6.7 (lockfile only). Typecheck, 105/105 tests and build all pass; no tests were changed.
+
+**Known, not fixed here:** dev-only advisories remain in `@vercel/node` (via `@fastify/busboy`,
+`undici`) and `vitest` (via `@vitest/mocker`). Fixing them needs breaking upgrades, so the audit
+job deliberately checks production dependencies only.
+
+**Not done:** third-party actions are pinned to major tags (`@v4`), not commit SHAs. Pin to SHAs
+when GitHub access allows looking them up. No deploy step was added; Vercel deploys as before.
+
+---
+
 ## Feature: greeting intent — CalmPath now greets back on a plain "hi"
 
 **What changed:** added `"greeting"` as a new `Intent` (agent/intent.ts), a new `greeting_response`
