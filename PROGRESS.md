@@ -1,5 +1,37 @@
 # Progress
 
+## Session signing: preview-key fix, clear failures, replay documented
+
+**Preview-key fix:** `sessionToken.ts` used to allow the public development fallback key anywhere
+except `VERCEL_ENV=production`, so Preview deployments (public URLs) signed tokens with a key that is
+in this repository, letting anyone forge a validly signed session there. The fallback is now allowed
+only on a local machine: `VERCEL_ENV` unset or `development`, and `NODE_ENV` not `production`.
+Production and Preview now require `CALMPATH_SESSION_SECRET` (32+ characters), as does any
+`NODE_ENV=production` host. **Action needed:** set the secret for the Preview environment in Vercel,
+or preview deployments will answer 500.
+
+**Clear failures:** new `SessionConfigError`. `api/turn.ts` answers it with HTTP 500 and a generic
+message and logs the cause (a setting name, never conversation content). Invalid messages still
+answer 400. Before, a missing secret in production surfaced as a misleading 400.
+
+**Replay: documented, not "fixed".** It cannot be closed without per-session server state, which
+the no-storage rule forbids, and an expiry would only shorten the window while silently lowering a
+committed tier in a long-open tab. Recorded in `SAFETY.md` ("Session token limits") and in the
+`sessionToken.ts` header. Mitigating fact, now tested: every message is screened from scratch, so a
+replayed token cannot hide the current message.
+
+**Tests:** `tests/session-key-policy.test.ts` (10): fallback allowed only locally, refused on
+production/preview/NODE_ENV=production, 32+ character secret works everywhere, short secret rejected,
+`/api/turn` returns 500 without logging the student's text, still returns 400 for bad input and 200
+for a good turn. `tests/token-limits.test.ts` (4): replay accepted (pinned as a known limit), current
+message still screened, edited payload rejected, no conversation text in the token. Typecheck clean,
+176/176 tests (162 existing untouched), build clean.
+
+**Not done:** accepting a previous secret during rotation (would stop rotation from resetting
+sessions); rate limiting `/api/turn`; non-English crisis patterns.
+
+---
+
 ## Safety: broader text normalisation before crisis-pattern matching
 
 **What changed:** `src/safety/normalize.ts` now folds the text before any pattern runs: typographic

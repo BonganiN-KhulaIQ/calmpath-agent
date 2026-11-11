@@ -1,5 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { handleTurnRequest, TurnRequestError } from "../src/server/turnHandler";
+import { SessionConfigError } from "../src/server/sessionToken";
 
 /**
  * Vercel serverless function: POST /api/turn
@@ -27,6 +28,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse): 
   } catch (err) {
     if (err instanceof TurnRequestError) {
       res.status(400).json({ error: err.message });
+      return;
+    }
+    if (err instanceof SessionConfigError) {
+      // Server misconfiguration (missing or weak signing secret), not the
+      // student's fault. Log the cause for the operator; the message names a
+      // setting and never contains conversation content.
+      // eslint-disable-next-line no-console
+      console.error(`[calmpath] ${err.message}`);
+      res.status(500).json({ error: "CalmPath is temporarily unavailable." });
       return;
     }
     // Covers parseTurnInput's zod error for empty/over-length text, and any

@@ -137,14 +137,15 @@ build succeeds. See `PROGRESS.md` for the exact command output from the most rec
 
 ## Deploying (Vercel)
 
-Set one environment variable in the Vercel project's settings before deploying to production:
+Set one environment variable in the Vercel project's settings, for **both Production and Preview**:
 
-- `CALMPATH_SESSION_SECRET` — any long, random string. It signs session tokens so a student's
-  browser can carry their session between requests without being able to edit it. Without this
-  set, the server falls back to a fixed, publicly-known development secret in local/preview use
-  and logs a warning; it deliberately refuses to start with that fallback in a production
-  deployment (`VERCEL_ENV === "production"`) so a missing secret fails loudly instead of shipping
-  an insecure default.
+- `CALMPATH_SESSION_SECRET` — a random string of at least 32 characters (for example
+  `openssl rand -base64 48`). It signs session tokens so a student's browser can carry their session
+  between requests without being able to edit it. If it is missing or too short, a deployed
+  environment (Production or Preview) refuses to serve turns: `/api/turn` answers HTTP 500 and logs
+  the cause. A publicly known development key is used only on a local development machine, because
+  preview URLs are reachable by anyone and that key is in this repository. Changing the secret
+  later restarts every session in progress at T0. See `SAFETY.md`, "Session token limits".
 
 ## Current provider / model status
 
