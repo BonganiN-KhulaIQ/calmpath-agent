@@ -1,5 +1,32 @@
 # Progress
 
+## Safety: broader text normalisation before crisis-pattern matching
+
+**What changed:** `src/safety/normalize.ts` now folds the text before any pattern runs: typographic
+apostrophes, zero-width/soft-hyphen/bidi characters, NFKC (fullwidth and compatibility forms),
+accents, lookalike Cyrillic/Greek letters, lowercase, punctuation between letters (`k.i.l.l`,
+`l-i-f-e`), and repeated whitespace. `matchCandidates()` also tries digit/symbol readings
+(`k1ll mys3lf`, `d3`, `$`, `@`), with `1` read as both `i` and `l`; only words that mix letters
+and digits are touched, so `3 assignments` or `2026` are unchanged. `detectTier` (risk.ts) matches
+against every candidate; `applyOutputGate` uses the base normalisation. No pattern, tier rule or
+pipeline order changed, and the text shown to the student is never altered.
+
+**Tests:** `tests/normalization-evasion.test.ts` (39): 19 disguised T3 phrasings, T2/T1 variants, an
+end-to-end sticky-T3 check, 12 false-positive guards (numbers, module codes, "kill the process",
+negated statements with and without tricks), idempotence, and output-gate pass-through. 22 of them
+fail without the change. Typecheck clean, 162/162 tests (123 existing untouched), build clean.
+
+**Still NOT handled (known gaps):**
+- **Other languages.** All patterns are English. isiZulu, isiXhosa, Sesotho, Setswana, Afrikaans
+  and mixed-language messages are not detected at all. For African ODeL students this is the
+  largest remaining gap; the phrases need review by speakers of those languages and ideally a
+  clinician before they are added.
+- Masked letters (`k*ll`), stretched letters (`diiie`), letters separated by spaces (`d i e`),
+  misspellings, and indirect or metaphorical phrasing.
+- Detection stays pattern-based and not exhaustive.
+
+---
+
 ## Hardening: security headers and minimum session-secret length
 
 **What changed:** added `vercel.json` with a strict Content-Security-Policy (`default-src 'self'`,

@@ -1,5 +1,5 @@
 import type { RiskTier } from "./types";
-import { normalizeForMatching } from "./normalize";
+import { matchCandidates } from "./normalize";
 
 // T3 — explicit self-harm/suicidal-intent signals. Each pattern is written to
 // match how this is actually phrased in natural language (including gerunds
@@ -42,12 +42,15 @@ const T1 = [
 ];
 
 export function detectTier(rawText: string): RiskTier {
-  // Fold typographic apostrophes (e.g. "don’t" typed on a phone) to ASCII so
-  // the patterns below match. Matching only; the text itself is untouched.
-  const text = normalizeForMatching(rawText);
-  if (T3.some((p) => p.test(text))) return "T3";
-  if (T2.some((p) => p.test(text))) return "T2";
-  if (T1.some((p) => p.test(text))) return "T1";
+  // Test every normalised reading of the text (typographic apostrophes,
+  // invisible characters, lookalike letters, digit substitutions...). Matching
+  // only; the text itself is untouched. See normalize.ts for what is covered.
+  const candidates = matchCandidates(rawText);
+  const hits = (patterns: readonly RegExp[]) =>
+    candidates.some((text) => patterns.some((p) => p.test(text)));
+  if (hits(T3)) return "T3";
+  if (hits(T2)) return "T2";
+  if (hits(T1)) return "T1";
   return "T0";
 }
 
