@@ -1,4 +1,5 @@
 import type { OutputGateResult, RiskTier } from "./types";
+import { normalizeForMatching } from "./normalize";
 
 // Diagnosis or clinical labels presented as conclusions.
 const DIAGNOSIS_PATTERNS = [
@@ -69,8 +70,11 @@ function buildChecks(tier: RiskTier): GateCheck[] {
  * forced — before it reaches the student. Never calls the model itself.
  */
 export function applyOutputGate(rawResponse: string, tier: RiskTier, fallback: string): OutputGateResult {
+  // Match on apostrophe-folded text so "you’re" is caught like "you're".
+  // The response returned to the student is still the original text.
+  const matchable = normalizeForMatching(rawResponse);
   const reasons = buildChecks(tier)
-    .filter((check) => check.test(rawResponse))
+    .filter((check) => check.test(matchable))
     .map((check) => check.reason);
 
   if (reasons.length > 0) {

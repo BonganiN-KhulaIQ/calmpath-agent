@@ -1,5 +1,30 @@
 # Progress
 
+## SAFETY-CRITICAL FIX: typographic apostrophes bypassed crisis detection
+
+**Bug (found in the DevSecOps audit):** `risk.ts` patterns only matched the ASCII apostrophe. iOS
+"smart punctuation" and many Android keyboards type U+2019, so `"I don’t want to be alive
+anymore"` resolved to **T0** (the same text with `'` is T3), `"I can’t go on"` to T0 (T2 with `'`),
+and `"I can’t cope"` to T0 (T1 with `'`). Reproduced before changing anything.
+
+**Fix:** new `src/safety/normalize.ts` (`normalizeForMatching`) folds U+2018, U+2019, U+201B,
+U+02BC, U+02B9, U+2032, U+00B4, backtick and U+FF07 to `'`. It is applied inside `detectTier`
+(risk.ts) and `applyOutputGate` (outputGate.ts, where `"you’re"` previously dodged the
+certainty-claim check). It is match-only: the text shown to the student is never altered, and
+no pattern, tier rule or pipeline order changed. The negation guard (`"don’t want to hurt myself"`
+is not T3) still holds with curly apostrophes.
+
+**Tests:** `tests/apostrophe-normalization.test.ts` (14): every variant at T3, T2/T1 phrasings, the
+negation guard, calm text with apostrophes stays T0, an end-to-end sticky-T3 check through
+`handleTurnRequest`, and output-gate blocking plus byte-for-byte pass-through. Confirmed they fail
+without the fix. Typecheck clean, 119/119 tests (105 existing untouched), build clean.
+
+**Not covered (follow-up):** other lookalike or hidden characters (zero-width characters,
+homoglyphs, repeated letters, leetspeak) can still evade the regex patterns. Detection remains
+pattern-based and not exhaustive.
+
+---
+
 ## Infra: GitHub Actions CI (`.github/workflows/ci.yml`)
 
 **What changed:** added CI that runs on every push to `main` and every PR: `npm ci`, typecheck,
