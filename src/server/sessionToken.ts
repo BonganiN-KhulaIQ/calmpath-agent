@@ -23,12 +23,24 @@ import { SessionContextSchema } from "./sessionSchema";
  * state, kept entirely on the client, exactly as before.
  */
 
+const MIN_SECRET_LENGTH = 32;
+
 const DEV_FALLBACK_SECRET =
   "calmpath-local-development-fallback-secret-DO-NOT-USE-IN-PRODUCTION";
 
 function resolveSecret(): string {
   const secret = process.env["CALMPATH_SESSION_SECRET"];
-  if (secret && secret.length > 0) return secret;
+  if (secret && secret.length > 0) {
+    // A short secret makes the HMAC guessable. Refuse it everywhere, not just
+    // in production, so a weak value is caught the first time it is used.
+    if (secret.length < MIN_SECRET_LENGTH) {
+      throw new Error(
+        `CALMPATH_SESSION_SECRET is too short (${secret.length} characters). ` +
+          `Use at least ${MIN_SECRET_LENGTH} random characters.`,
+      );
+    }
+    return secret;
+  }
 
   if (process.env["VERCEL_ENV"] === "production") {
     throw new Error(

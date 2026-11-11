@@ -1,5 +1,31 @@
 # Progress
 
+## Hardening: security headers and minimum session-secret length
+
+**What changed:** added `vercel.json` with a strict Content-Security-Policy (`default-src 'self'`,
+no `unsafe-inline`/`unsafe-eval`, `frame-ancestors 'none'`), `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, a locked-down `Permissions-Policy`, HSTS,
+and `Cache-Control: no-store` on `/api/*`. `sessionToken.ts` now refuses a
+`CALMPATH_SESSION_SECRET` shorter than 32 characters (in every environment).
+
+**Checked:** the built `dist/index.html` has no inline script or style and the client has no
+inline `style` attributes, so the CSP should not break the UI. Not yet confirmed in a real browser
+on a Vercel deployment: open the deployed site once with devtools and check the console for CSP
+errors.
+
+**Before deploying:** make sure the Vercel `CALMPATH_SESSION_SECRET` is at least 32 random
+characters, or the API will reject every request. Generate one with `openssl rand -base64 48`.
+
+**Tests:** `tests/hardening.test.ts` (4): short secret rejected, 32-character secret round-trips,
+header values in `vercel.json`. Typecheck clean, 123/123 tests (119 existing untouched), build clean.
+
+**Still open from the audit:** preview deployments fall back to the public dev secret; escalation
+can be sidestepped by replaying an older token (no expiry; documented limit of the stateless
+design); config errors in `api/turn.ts` return a generic 400 instead of a logged 500; no rate
+limit on `/api/turn`.
+
+---
+
 ## SAFETY-CRITICAL FIX: typographic apostrophes bypassed crisis detection
 
 **Bug (found in the DevSecOps audit):** `risk.ts` patterns only matched the ASCII apostrophe. iOS
