@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Least privilege: CI only needs to read the repo.
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same branch/PR.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install (lockfile only)
+        run: npm ci --no-audit --no-fund
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Safety suites run as part of the full test run. Never skip or weaken them.
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      # The signing secret must never reach the browser bundle (see PROGRESS.md).
+      - name: Verify no server secrets in client bundle
+        run: |
+          if grep -rEl 'CALMPATH_SESSION_SECRET|createHmac|node:crypto' dist/assets; then
+            echo "::error::Server-only signing code or secret name found in client bundle"
+            exit 1
+          fi
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      # Fails on high/critical advisories in runtime dependencies only.
+      - name: npm audit (production deps)
+        run: npm audit --omit=dev --audit-level=high

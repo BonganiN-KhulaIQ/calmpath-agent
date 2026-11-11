@@ -21,29 +21,75 @@ import { SessionContextSchema } from "./sessionSchema";
  *
  * This still stores nothing server-side: the signed token itself IS the
  * state, kept entirely on the client, exactly as before.
+ *
+ * KNOWN, ACCEPTED LIMIT — replay: a token is valid for as long as the secret
+ * is. A client that keeps an EARLIER token (say one issued before it
+ * escalated) can send it again, which is equivalent to Reset: the server
+ * cannot tell, because telling would need per-session server state, which the
+ * no-storage constraint rules out. Adding an expiry would not close this
+ * (it only shortens the window) and would silently lower a committed tier for
+ * a tab left open past the expiry, so none is added. Detection of the
+ * CURRENT message is unaffected: every turn is screened from scratch, so a
+ * replayed token can never hide what the student writes now. Documented in
+ * SAFETY.md; pinned by tests/token-limits.test.ts.
  */
+
+const MIN_SECRET_LENGTH = 32;
+
+/**
+ * Thrown when session signing cannot run safely (missing or weak secret in a
+ * deployed environment). Distinct from a bad request so the HTTP layer can
+ * answer 500 and log the misconfiguration instead of blaming the student.
+ * The message never contains conversation content.
+ */
+export class SessionConfigError extends Error {}
+
+/**
+ * The public development fallback key may only be used on a developer's own
+ * machine (plain `npm run dev`, `vercel dev`, tests). Any deployed
+ * environment is refused: production, AND preview, because preview URLs are
+ * reachable by anyone and this key is in the public repository, so anyone
+ * could forge a validly signed token there.
+ */
+function fallbackAllowed(): boolean {
+  const vercelEnv = process.env["VERCEL_ENV"];
+  if (vercelEnv !== undefined && vercelEnv !== "" && vercelEnv !== "development") return false;
+  if (process.env["NODE_ENV"] === "production") return false;
+  return true;
+}
 
 const DEV_FALLBACK_SECRET =
   "calmpath-local-development-fallback-secret-DO-NOT-USE-IN-PRODUCTION";
 
 function resolveSecret(): string {
   const secret = process.env["CALMPATH_SESSION_SECRET"];
-  if (secret && secret.length > 0) return secret;
+  if (secret && secret.length > 0) {
+    // A short secret makes the HMAC guessable. Refuse it everywhere, not just
+    // in production, so a weak value is caught the first time it is used.
+    if (secret.length < MIN_SECRET_LENGTH) {
+      throw new SessionConfigError(
+        `CALMPATH_SESSION_SECRET is too short (${secret.length} characters). ` +
+          `Use at least ${MIN_SECRET_LENGTH} random characters.`,
+      );
+    }
+    return secret;
+  }
 
-  if (process.env["VERCEL_ENV"] === "production") {
-    throw new Error(
+  if (!fallbackAllowed()) {
+    throw new SessionConfigError(
       "CALMPATH_SESSION_SECRET is not set. Set it in the Vercel project's " +
-        "Environment Variables before deploying to production — session " +
-        "signing must not run on a fallback secret in production.",
+        "Environment Variables for every environment that serves traffic " +
+        "(Production AND Preview). Session signing must not run on the " +
+        "public development fallback key in a deployed environment.",
     );
   }
 
   // eslint-disable-next-line no-console
   console.warn(
-    "[calmpath] CALMPATH_SESSION_SECRET is not set — using an insecure, " +
-      "development-only fallback signing key. This is fine for local dev " +
-      "and preview only. Set the real environment variable before going " +
-      "to production.",
+    "[calmpath] CALMPATH_SESSION_SECRET is not set — using the insecure, " +
+      "publicly known development fallback key. This only runs on a local " +
+      "development machine; deployed environments refuse to start without " +
+      "a real secret.",
   );
   return DEV_FALLBACK_SECRET;
 }

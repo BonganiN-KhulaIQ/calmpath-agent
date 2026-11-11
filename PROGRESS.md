@@ -1,5 +1,137 @@
 # Progress
 
+## Session signing: preview-key fix, clear failures, replay documented
+
+**Preview-key fix:** `sessionToken.ts` used to allow the public development fallback key anywhere
+except `VERCEL_ENV=production`, so Preview deployments (public URLs) signed tokens with a key that is
+in this repository, letting anyone forge a validly signed session there. The fallback is now allowed
+only on a local machine: `VERCEL_ENV` unset or `development`, and `NODE_ENV` not `production`.
+Production and Preview now require `CALMPATH_SESSION_SECRET` (32+ characters), as does any
+`NODE_ENV=production` host. **Action needed:** set the secret for the Preview environment in Vercel,
+or preview deployments will answer 500.
+
+**Clear failures:** new `SessionConfigError`. `api/turn.ts` answers it with HTTP 500 and a generic
+message and logs the cause (a setting name, never conversation content). Invalid messages still
+answer 400. Before, a missing secret in production surfaced as a misleading 400.
+
+**Replay: documented, not "fixed".** It cannot be closed without per-session server state, which
+the no-storage rule forbids, and an expiry would only shorten the window while silently lowering a
+committed tier in a long-open tab. Recorded in `SAFETY.md` ("Session token limits") and in the
+`sessionToken.ts` header. Mitigating fact, now tested: every message is screened from scratch, so a
+replayed token cannot hide the current message.
+
+**Tests:** `tests/session-key-policy.test.ts` (10): fallback allowed only locally, refused on
+production/preview/NODE_ENV=production, 32+ character secret works everywhere, short secret rejected,
+`/api/turn` returns 500 without logging the student's text, still returns 400 for bad input and 200
+for a good turn. `tests/token-limits.test.ts` (4): replay accepted (pinned as a known limit), current
+message still screened, edited payload rejected, no conversation text in the token. Typecheck clean,
+176/176 tests (162 existing untouched), build clean.
+
+**Not done:** accepting a previous secret during rotation (would stop rotation from resetting
+sessions); rate limiting `/api/turn`; non-English crisis patterns.
+
+---
+
+## Safety: broader text normalisation before crisis-pattern matching
+
+**What changed:** `src/safety/normalize.ts` now folds the text before any pattern runs: typographic
+apostrophes, zero-width/soft-hyphen/bidi characters, NFKC (fullwidth and compatibility forms),
+accents, lookalike Cyrillic/Greek letters, lowercase, punctuation between letters (`k.i.l.l`,
+`l-i-f-e`), and repeated whitespace. `matchCandidates()` also tries digit/symbol readings
+(`k1ll mys3lf`, `d3`, `$`, `@`), with `1` read as both `i` and `l`; only words that mix letters
+and digits are touched, so `3 assignments` or `2026` are unchanged. `detectTier` (risk.ts) matches
+against every candidate; `applyOutputGate` uses the base normalisation. No pattern, tier rule or
+pipeline order changed, and the text shown to the student is never altered.
+
+**Tests:** `tests/normalization-evasion.test.ts` (39): 19 disguised T3 phrasings, T2/T1 variants, an
+end-to-end sticky-T3 check, 12 false-positive guards (numbers, module codes, "kill the process",
+negated statements with and without tricks), idempotence, and output-gate pass-through. 22 of them
+fail without the change. Typecheck clean, 162/162 tests (123 existing untouched), build clean.
+
+**Still NOT handled (known gaps):**
+- **Other languages.** All patterns are English. isiZulu, isiXhosa, Sesotho, Setswana, Afrikaans
+  and mixed-language messages are not detected at all. For African ODeL students this is the
+  largest remaining gap; the phrases need review by speakers of those languages and ideally a
+  clinician before they are added.
+- Masked letters (`k*ll`), stretched letters (`diiie`), letters separated by spaces (`d i e`),
+  misspellings, and indirect or metaphorical phrasing.
+- Detection stays pattern-based and not exhaustive.
+
+---
+
+## Hardening: security headers and minimum session-secret length
+
+**What changed:** added `vercel.json` with a strict Content-Security-Policy (`default-src 'self'`,
+no `unsafe-inline`/`unsafe-eval`, `frame-ancestors 'none'`), `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, a locked-down `Permissions-Policy`, HSTS,
+and `Cache-Control: no-store` on `/api/*`. `sessionToken.ts` now refuses a
+`CALMPATH_SESSION_SECRET` shorter than 32 characters (in every environment).
+
+**Checked:** the built `dist/index.html` has no inline script or style and the client has no
+inline `style` attributes, so the CSP should not break the UI. Not yet confirmed in a real browser
+on a Vercel deployment: open the deployed site once with devtools and check the console for CSP
+errors.
+
+**Before deploying:** make sure the Vercel `CALMPATH_SESSION_SECRET` is at least 32 random
+characters, or the API will reject every request. Generate one with `openssl rand -base64 48`.
+
+**Tests:** `tests/hardening.test.ts` (4): short secret rejected, 32-character secret round-trips,
+header values in `vercel.json`. Typecheck clean, 123/123 tests (119 existing untouched), build clean.
+
+**Still open from the audit:** preview deployments fall back to the public dev secret; escalation
+can be sidestepped by replaying an older token (no expiry; documented limit of the stateless
+design); config errors in `api/turn.ts` return a generic 400 instead of a logged 500; no rate
+limit on `/api/turn`.
+
+---
+
+## SAFETY-CRITICAL FIX: typographic apostrophes bypassed crisis detection
+
+**Bug (found in the DevSecOps audit):** `risk.ts` patterns only matched the ASCII apostrophe. iOS
+"smart punctuation" and many Android keyboards type U+2019, so `"I don’t want to be alive
+anymore"` resolved to **T0** (the same text with `'` is T3), `"I can’t go on"` to T0 (T2 with `'`),
+and `"I can’t cope"` to T0 (T1 with `'`). Reproduced before changing anything.
+
+**Fix:** new `src/safety/normalize.ts` (`normalizeForMatching`) folds U+2018, U+2019, U+201B,
+U+02BC, U+02B9, U+2032, U+00B4, backtick and U+FF07 to `'`. It is applied inside `detectTier`
+(risk.ts) and `applyOutputGate` (outputGate.ts, where `"you’re"` previously dodged the
+certainty-claim check). It is match-only: the text shown to the student is never altered, and
+no pattern, tier rule or pipeline order changed. The negation guard (`"don’t want to hurt myself"`
+is not T3) still holds with curly apostrophes.
+
+**Tests:** `tests/apostrophe-normalization.test.ts` (14): every variant at T3, T2/T1 phrasings, the
+negation guard, calm text with apostrophes stays T0, an end-to-end sticky-T3 check through
+`handleTurnRequest`, and output-gate blocking plus byte-for-byte pass-through. Confirmed they fail
+without the fix. Typecheck clean, 119/119 tests (105 existing untouched), build clean.
+
+**Not covered (follow-up):** other lookalike or hidden characters (zero-width characters,
+homoglyphs, repeated letters, leetspeak) can still evade the regex patterns. Detection remains
+pattern-based and not exhaustive.
+
+---
+
+## Infra: GitHub Actions CI (`.github/workflows/ci.yml`)
+
+**What changed:** added CI that runs on every push to `main` and every PR: `npm ci`, typecheck,
+the full test suite (including the safety suites), production build, and a check that the client
+bundle contains no `CALMPATH_SESSION_SECRET` / `createHmac` / `node:crypto`. A separate job runs
+`npm audit --omit=dev --audit-level=high`. Workflow permissions are `contents: read`, checkout
+does not persist credentials, runs are cancelled when superseded, Node 22.
+
+**Dependency fix needed for a green audit:** runtime dependency `zod` was 4.x below 4.6.6, which
+has a high-severity memory-exhaustion advisory (GHSA-mrhx-c7xc-m3w5). `zod` guards the `/api/turn`
+request body and the session-token shape, so it was bumped within the existing `^4.1.5` range to
+4.6.7 (lockfile only). Typecheck, 105/105 tests and build all pass; no tests were changed.
+
+**Known, not fixed here:** dev-only advisories remain in `@vercel/node` (via `@fastify/busboy`,
+`undici`) and `vitest` (via `@vitest/mocker`). Fixing them needs breaking upgrades, so the audit
+job deliberately checks production dependencies only.
+
+**Not done:** third-party actions are pinned to major tags (`@v4`), not commit SHAs. Pin to SHAs
+when GitHub access allows looking them up. No deploy step was added; Vercel deploys as before.
+
+---
+
 ## Feature: greeting intent — CalmPath now greets back on a plain "hi"
 
 **What changed:** added `"greeting"` as a new `Intent` (agent/intent.ts), a new `greeting_response`
