@@ -9,7 +9,7 @@ import { handleTurnRequest, TurnRequestError } from "./src/server/turnHandler";
  * keeps working with the same `npm run dev` command as before the backend
  * split — no separate local server or Vercel CLI is required to try the
  * app end-to-end on your own machine. It is dev-only: this plugin is not
- * part of the production build, and Vercel serves api/turn.ts directly.
+ * part of the production build, and Vercel serves the bundled api/turn.js (built from src/server/turnApi.ts).
  */
 function calmpathApiDevPlugin(): Plugin {
   return {

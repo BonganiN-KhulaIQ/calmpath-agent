@@ -35,6 +35,15 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      # Vercel runs the committed bundle api/turn.js, not the TypeScript source.
+      - name: Check committed API bundle is up to date
+        run: |
+          npm run build:api
+          git diff --exit-code -- api/turn.js || {
+            echo "::error::api/turn.js is out of date. Run 'npm run build:api' and commit it."
+            exit 1
+          }
+
       # Safety suites run as part of the full test run. Never skip or weaken them.
       - name: Test
         run: npm test

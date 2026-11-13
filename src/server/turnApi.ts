@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { handleTurnRequest, TurnRequestError } from "../src/server/turnHandler";
-import { SessionConfigError } from "../src/server/sessionToken";
+import { handleTurnRequest, TurnRequestError } from "./turnHandler";
+import { SessionConfigError } from "./sessionToken";
 
 /**
  * Vercel serverless function: POST /api/turn
@@ -10,6 +10,15 @@ import { SessionConfigError } from "../src/server/sessionToken";
  * src/server/sessionToken.ts, which are framework-independent and unit
  * tested directly. This file's only job is translating between Vercel's
  * request/response objects and that handler.
+ *
+ * DEPLOYMENT NOTE: this file is NOT what Vercel runs. The package is
+ * "type": "module", and Node's ES-module loader refuses the extensionless
+ * relative imports used across src/ (and JSON imports without attributes),
+ * which crashed the function at start-up with ERR_MODULE_NOT_FOUND. So
+ * `npm run build:api` bundles this file and everything it imports into the
+ * single self-contained, committed file api/turn.js, and that is what Vercel
+ * deploys. Edit THIS file, then run `npm run build:api`; CI fails if the
+ * committed bundle is out of date.
  *
  * No conversation text or session state is stored here or anywhere else —
  * this function is stateless per invocation, matching CLAUDE.md's
