@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { runAgentTurn, initialAgentState } from "../agent/orchestrator";
-import { mockProvider } from "../providers/mock";
+import { selectProvider } from "../providers/select";
+import type { ModelProvider } from "../safety/types";
 import { signSession, verifySession } from "./sessionToken";
 import type { RiskTier } from "../safety/types";
 import type { Intent } from "../agent/intent";
@@ -37,14 +38,17 @@ export interface TurnResponseBody {
 /**
  * Handles one turn end-to-end: verifies the incoming session token (falling
  * back to a fresh session on any tampering, per sessionToken.ts), runs the
- * full safety pipeline server-side with the mock provider, and returns a
+ * full safety pipeline server-side with the configured provider (mock unless CALMPATH_LLM_API_KEY is set), and returns a
  * freshly signed token for the next request.
  *
  * Throws `TurnRequestError` for a malformed request body, and re-throws
  * whatever `runAgentTurn` / `parseTurnInput` throw for invalid turn text
  * (e.g. empty or over-length) — callers map both to an HTTP 400.
  */
-export async function handleTurnRequest(rawBody: unknown): Promise<TurnResponseBody> {
+export async function handleTurnRequest(
+  rawBody: unknown,
+  provider: ModelProvider = selectProvider(),
+): Promise<TurnResponseBody> {
   const parsed = TurnRequestSchema.safeParse(rawBody);
   if (!parsed.success) {
     throw new TurnRequestError("Request body must be { text: string, sessionToken?: string }");
@@ -53,7 +57,7 @@ export async function handleTurnRequest(rawBody: unknown): Promise<TurnResponseB
   const { text, sessionToken } = parsed.data;
   const session = verifySession(sessionToken ?? null);
 
-  const result = await runAgentTurn(session, text, mockProvider);
+  const result = await runAgentTurn(session, text, provider);
 
   return {
     sessionToken: signSession(result.session),

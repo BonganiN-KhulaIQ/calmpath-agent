@@ -149,12 +149,14 @@ Set one environment variable in the Vercel project's settings, for **both Produc
 
 ## Current provider / model status
 
-CalmPath currently ships with a **mock provider only** (`src/providers/mock.ts`) — a small,
-fixed set of tier-appropriate canned replies. No API key, no network call, no real language
-model is wired in yet. The provider interface is designed so a hosted-relay or local (e.g.
-Ollama) provider can be swapped in later without changing the safety pipeline, but that work has
-not been done. Nothing in this repository sends data to, or receives generated text from, an
-external LLM API today.
+By default CalmPath uses the **mock provider** (`src/providers/mock.ts`): fixed, tier-appropriate canned
+replies, no API key and no network call. A **hosted relay provider** (`src/providers/relay.ts`) exists but
+is **off unless `CALMPATH_LLM_API_KEY` is set** on the server (optional `CALMPATH_LLM_MODEL`;
+`CALMPATH_PROVIDER=mock` forces the mock). When on, the student's message text is sent to the model
+provider, every reply is checked by a second, separate model call (the reviewer, which sees only the reply and
+cannot be turned off), anything not clearly approved is replaced by the mock's fixed text, and nothing is called at
+T3. Do not enable it for real students until clinician review of real replies is done and a data-processing
+position is agreed (see `PROGRESS.md`).
 
 ## South African resources
 

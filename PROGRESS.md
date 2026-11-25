@@ -1,5 +1,113 @@
 # Progress
 
+## Second-pass reply review (model-backed, fails closed)
+
+**What:** `src/providers/reviewer.ts` makes a separate model call that judges each model-written reply
+against the CalmPath rules (diagnosis, medication, impersonation, certainty, discouraging support, substances,
+productivity pressure, false reassurance, self-harm content, demeaning). `select.ts` always wraps the relay
+in it (`withReview`); there is no setting that turns it off when a key is set. Shared API call helper:
+`src/providers/anthropic.ts`. Optional `CALMPATH_REVIEW_MODEL` (defaults to the same Haiku model).
+
+**Fails closed:** a reply is used only if the reviewer answers a strict `{"safe": true}`. A timeout, HTTP
+error, empty or malformed answer, a non-boolean `safe`, or `safe: false` all mean the deterministic fallback
+text is shown instead. The regex output gate still runs afterwards on the whole composed response.
+
+**Privacy and injection:** the reviewer receives only the reply, never the student's message, wrapped as
+untrusted data with the wrapper tags stripped from the reply. Logs carry only a category label.
+
+**Scope:** model text only. Tool content and the T3 forced response are deterministic, and T3 calls no
+provider (so no reviewer call either). With no key nothing changes.
+
+**Cost and latency:** each turn is two model calls, reply then review. Timeouts are 6 s and 3 s, so the
+worst case (about 9 s) fits under Vercel's default 10 s function limit with little spare. If the reply
+call is slow the student gets the fixed reply, never an error.
+
+**Tests:** `tests/reply-reviewer.test.ts` (29): strict parsing, key and wrapper handling, no student text sent,
+every failure mode, `withReview`, and the full pipeline. One test uses a reply the regex gate demonstrably
+misses ("You must have a chemical imbalance…") and shows that only the reviewer stops it. Typecheck clean,
+293/293 tests, build clean, `api/turn.js` rebuilt.
+
+**NOT verified:** never run against the real API, because there is no key in this workspace. The first run
+with a key should confirm the reviewer actually answers in the expected JSON for the chosen model, and that
+it approves ordinary supportive replies often enough (a reviewer that rejects too much just means the
+fixed replies are shown). Review a sample of real reviewed and rejected replies before any pilot.
+
+**Still open:** the reviewer is a model, so it can also be wrong; the English-only limit still applies;
+no rate limiting on `/api/turn` (matters more now that each turn costs two calls).
+
+---
+
+## Output gate hardening for free-form model text
+
+**Why:** with a real model behind the relay, the gate sees free-form text. Before this change these all
+passed it: "You probably have depression, so you should start taking antidepressants.", "It sounds like you
+may have an anxiety disorder.", "Try upping your dose a little, it should help.", "I'm a trained counsellor
+and I can help you here."
+
+**What changed (`src/safety/outputGate.ts`; existing categories and behaviour kept, patterns broadened):**
+- *diagnosis*: hedged and indirect forms ("you may have…", "it sounds like…", "your symptoms are consistent
+  with…", "you're probably depressed", "I diagnose…") across a wider list of conditions. Bare "anxiety" and
+  "depression" are only flagged as "you have/show signs of…", and "anxiety about exams" is not flagged.
+- *medication*: many more verbs, drug classes and brand names, "benefit from / need X", "if you stopped X".
+- *impersonation*: "I'm a (trained) counsellor/psychologist/nurse…", "as a …", "in my professional opinion",
+  and promising to call an ambulance, the police or "send help".
+- *certainty_claim*: "I know exactly how you feel", "I can tell you're…", promises and guarantees.
+- New *discourages_support* (don't tell anyone, keep this between us, no need to see a counsellor) and
+  *substance_suggestion* (alcohol, dagga and similar as a way to cope) categories.
+- *productivity_pressure* (T1+): "snap out of it", "get over it", "others have it worse", and similar.
+- Matching now runs on every normalised candidate, including digit/symbol readings (`st0p t4king m3ds`),
+  zero-width characters, lookalike letters and hyphenated drug names.
+- Diagnosis and medication are checked sentence by sentence, with exemptions so good replies are not
+  blocked: "I can't diagnose you", "please don't stop your medication", "ask your doctor whether
+  medication could help", and echoing "you stopped taking your medication". A fake referral ("ask your
+  doctor, but honestly just stop your pills") and a disclaimer next to an unsafe sentence do not count.
+
+**Tests:** `tests/outputGate-hardening.test.ts` (about 70): the phrasings above, 20 supportive replies that
+must still pass, every local tool's content and the T3 forced response at T0 to T2, and formatting evasion.
+All existing tests unchanged. Typecheck clean, 264/264 tests, build clean, `api/turn.js` rebuilt.
+
+**Probed with 24 unseen unsafe phrasings after the first version:** 18 blocked; 13 of 13 good replies passed.
+
+**Still NOT caught (known gaps):**
+- Elliptical or indirect diagnosis ("I suspect you do too", "you must have a chemical imbalance", "maybe
+  depression" after "I'd say you're dealing with…").
+- Insulting or demeaning the student ("you're just lazy").
+- Casual endorsement of substances ("cannabis is great for stress").
+- Other languages. The gate and the crisis patterns are English only.
+- Anything a pattern list cannot anticipate. This is a net with holes, not a guarantee. Before real students
+  use a model-backed CalmPath, add a second-pass check (for example a separate classifier call on the reply)
+  and have a clinician review a sample of real replies.
+
+---
+
+## Hosted relay provider (server-side LLM), off by default + coursework routing fix
+
+**Relay provider:** `src/providers/relay.ts` calls an LLM (Anthropic Messages API, default model
+`claude-haiku-5-5`) from the server only. `src/providers/select.ts` picks it only when
+`CALMPATH_LLM_API_KEY` is set (optional `CALMPATH_LLM_MODEL`; `CALMPATH_PROVIDER=mock` forces the mock).
+With no key nothing changes: the mock is used and no network call is made. The relay has an 8 s
+timeout and falls back to the mock text on any error, empty reply or non-200, and logs only a status
+label, never student text. It is never called at T3, and its reply is composed with the tool content
+and scanned by the output gate like any other text. The key is read only in `/api/turn`, never in the
+browser.
+
+**Privacy change when a key is set:** the student's message text is sent to the model provider. Until now
+nothing left the server. This needs a POPIA / data-processing position before any real students use it.
+
+**Routing fix:** `classifyIntent` had no coursework pattern, so "I have 3 assignments due" fell through
+to `express` and repeated the emotional check-in verbatim. A workload message that names no feeling now
+routes to `understand` (-> `academic_pressure_support` at T1/T2). Messages that name a feeling stay
+`express`, so the existing tests are unchanged.
+
+**Tests:** `tests/relay-provider.test.ts` (12 new): request shape, key stays server-side, fallbacks, timeout,
+selector, never called at T3, unsafe model text replaced by the gate, routing. Typecheck clean, 193/193
+tests (181 existing untouched), build clean, `api/turn.js` rebuilt.
+
+**Known gap:** the output gate was regex-based and written for canned text; hand-probed model-style phrasings
+passed it. Fixed in the next section.
+
+---
+
 ## Fix: /api/turn crashed on Vercel (ERR_MODULE_NOT_FOUND) — function is now bundled
 
 **Symptom:** on a Vercel deployment every message failed with "That message couldn't be sent".

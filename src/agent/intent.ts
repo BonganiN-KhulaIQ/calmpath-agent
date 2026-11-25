@@ -20,6 +20,9 @@ export type Intent =
 // substring test.
 const GREETING = /^\s*(?:hi+|hello+|hey+|hiya|heya|howdy|yo+|sup|howzit|good\s+(?:morning|afternoon|evening|day))(?:\s*,?\s*(?:there|calmpath))?[\s!.,]*$/i;
 
+const ACADEMIC_LOAD = /\b(?:assignments?|exams?|deadlines?|due|submissions?|modules?|studying|study|marks?)\b/;
+const FEELING_WORDS = /\b(?:feel|feeling|felt|overwhelm\w*|hopeless|stress\w*|anxi\w*|worr\w*|scared|afraid|sad|tired|exhausted|panic\w*|cope|coping)\b/;
+
 export function classifyIntent(text: string): Intent {
   const t = text.toLowerCase();
   if (/\b(?:emergency|kill myself|hurt myself|die)\b/.test(t)) return "crisis_signal";
@@ -28,5 +31,10 @@ export function classifyIntent(text: string): Intent {
   if (/(appointment|doctor|visit)/.test(t)) return "prepare";
   if (/(why|what does|explain)/.test(t)) return "understand";
   if (GREETING.test(text.trim())) return "greeting";
+  // Coursework pressure stated as a workload ("3 assignments due"), with no
+  // feeling named, routes to academic_pressure_support at T1/T2 via the
+  // `understand` intent (T0 stays reflective conversation). A message that
+  // names a feeling ("I feel overwhelmed about my exams") stays `express`.
+  if (ACADEMIC_LOAD.test(t) && !FEELING_WORDS.test(t)) return "understand";
   return "express";
 }
